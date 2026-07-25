@@ -1,0 +1,28 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+
+# Local data
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/.heartbeat_last
+
+# Runtime logs
+logs/*.log
+logs/*.log.*
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store

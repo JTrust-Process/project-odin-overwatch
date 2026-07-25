@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project Odin Overwatch</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <!-- globe.gl -->
+  <script src="https://unpkg.com/globe.gl@2.32.6/dist/globe.gl.min.js"></script>
+
+  <!-- Chart.js (timeline) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #131826;
+      --panel-2: #1a2030;
+      --border: #232a3d;
+      --text: #e6eaf2;
+      --text-dim: #8893a8;
+      --accent: #4cc9f0;
+      --low: #95a5a6;
+      --medium: #e67e22;
+      --high: #e74c3c;
+      --drone: #4cc9f0;
+      --missile: #f72585;
+      --rocket: #b5179e;
+      --air-defense: #7209b7;
+      --airspace: #f9c74f;
+      --unknown: #6b7280;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ===== Header ===== */
+    header {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      position: relative;
+      z-index: 1000;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text);
+      font-weight: 600;
+    }
+    header h1 .dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--high);
+      margin-right: 8px;
+      vertical-align: middle;
+      box-shadow: 0 0 8px var(--high);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    header .spacer { flex: 1; }
+
+    .filters {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .filters label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+    }
+    .filters select {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 13px;
+      outline: none;
+    }
+    .filters select:focus { border-color: var(--accent); }
+
+    .toggle {
+      display: flex;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .toggle button {
+      background: transparent;
+      color: var(--text-dim);
+      border: 0;
+      padding: 5px 12px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .toggle button.active {
+      background: var(--accent);
+      color: #0b0e14;
+    }
+
+    /* ===== Main layout ===== */
+    .main {
+      position: absolute;
+      top: 56px; left: 0; right: 0; bottom: 0;
+      display: flex;
+    }
+    .view-container {
+      flex: 1;
+      position: relative;
+      background: #000;
+    }
+    .view { position: absolute; inset: 0; }
+    .view.hidden { display: none; }
+
+    /* ===== Sidebar ===== */
+    aside {
+      width: 380px;
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .stats {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .timeline-wrap {
+      padding: 8px 12px 12px;
+      border-bottom: 1px solid var(--border);
+      height: 130px;
+    }
+    .timeline-wrap canvas { width: 100% !important; height: 100% !important; }
+    .sub-filters {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .sub-filters input[type=search],
+    .sub-filters select {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      outline: none;
+    }
+    .sub-filters input[type=search] { flex: 1; }
+    .sub-filters input[type=search]:focus,
+    .sub-filters select:focus { border-color: var(--accent); }
+    .sub-filters select { max-width: 140px; }
+    .stat-card {
+      background: var(--panel-2);
+      border-radius: 6px;
+      padding: 8px 6px;
+      text-align: center;
+    }
+    .stat-card .num { font-size: 18px; font-weight: 700; }
+    .stat-card .label {
+      font-size: 9px; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .stat-card.high .num { color: var(--high); }
+    .stat-card.medium .num { color: var(--medium); }
+    .stat-card.low .num { color: var(--low); }
+
+    .events-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px;
+    }
+    .events-list::-webkit-scrollbar { width: 6px; }
+    .events-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .event {
+      background: var(--panel-2);
+      border-left: 3px solid var(--low);
+      border-radius: 4px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .event:hover { background: #232a3d; }
+    .event.severity-MEDIUM { border-left-color: var(--medium); }
+    .event.severity-HIGH { border-left-color: var(--high); }
+    .event-meta {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .event-type {
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-weight: 700;
+      color: #0b0e14;
+    }
+    .event-type.DRONE { background: var(--drone); }
+    .event-type.MISSILE { background: var(--missile); color: #fff; }
+    .event-type.ROCKET { background: var(--rocket); color: #fff; }
+    .event-type.AIR_DEFENSE { background: var(--air-defense); color: #fff; }
+    .event-type.AIRSPACE { background: var(--airspace); }
+    .event-type.UNKNOWN { background: var(--unknown); color: #fff; }
+    .event-sev.HIGH { color: var(--high); }
+    .event-sev.MEDIUM { color: var(--medium); }
+    .event-title {
+      font-size: 12.5px;
+      line-height: 1.35;
+      color: var(--text);
+    }
+    .event-loc {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .empty {
+      padding: 20px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+
+    .footer {
+      padding: 8px 12px;
+      font-size: 10px;
+      color: var(--text-dim);
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+
+    /* ===== Leaflet popup tweaks ===== */
+    .leaflet-popup-content-wrapper {
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .leaflet-popup-content { margin: 10px 12px; }
+    .leaflet-popup-tip { background: var(--panel); }
+    .leaflet-container { background: #000; }
+
+    /* ===== Globe tooltip ===== */
+    .globe-tooltip {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      max-width: 300px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1><span class="dot"></span>Project Odin Overwatch</h1>
+  <div class="spacer"></div>
+
+  <div class="filters">
+    <label>Window</label>
+    <select id="filter-hours">
+      <option value="6">6h</option>
+      <option value="24">24h</option>
+      <option value="72" selected>72h</option>
+      <option value="168">7d</option>
+      <option value="720">30d</option>
+    </select>
+
+    <label>Type</label>
+    <select id="filter-type">
+      <option value="">All</option>
+      <option value="DRONE">Drone</option>
+      <option value="MISSILE">Missile</option>
+      <option value="ROCKET">Rocket</option>
+      <option value="AIR_DEFENSE">Air defense</option>
+      <option value="AIRSPACE">Airspace</option>
+    </select>
+
+    <label>Min severity</label>
+    <select id="filter-severity">
+      <option value="">All</option>
+      <option value="LOW">Low+</option>
+      <option value="MEDIUM" selected>Medium+</option>
+      <option value="HIGH">High only</option>
+    </select>
+  </div>
+
+  <div class="toggle" id="view-toggle">
+    <button data-view="map" class="active">Map</button>
+    <button data-view="globe">Globe</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="view-container">
+    <div id="map" class="view"></div>
+    <div id="globe" class="view hidden"></div>
+  </div>
+
+  <aside>
+    <div class="stats" id="stats">
+      <div class="stat-card"><div class="num" id="stat-total">—</div><div class="label">Events</div></div>
+      <div class="stat-card high"><div class="num" id="stat-high">—</div><div class="label">High</div></div>
+      <div class="stat-card medium"><div class="num" id="stat-medium">—</div><div class="label">Med</div></div>
+      <div class="stat-card low"><div class="num" id="stat-low">—</div><div class="label">Low</div></div>
+    </div>
+    <div class="timeline-wrap"><canvas id="timeline-chart"></canvas></div>
+    <div class="sub-filters">
+      <input type="search" id="filter-search" placeholder="Search title…" autocomplete="off" />
+      <select id="filter-country" title="Filter by country">
+        <option value="">All countries</option>
+      </select>
+    </div>
+    <div class="events-list" id="events-list"></div>
+    <div class="footer">
+      Public-source monitor • educational use only • <span id="last-refresh">never</span>
+    </div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  // ============ Config ============
+  const SEVERITY_COLOR = { LOW: '#95a5a6', MEDIUM: '#e67e22', HIGH: '#e74c3c' };
+  const SEVERITY_RADIUS = { LOW: 5, MEDIUM: 8, HIGH: 12 };
+  const TYPE_COLOR = {
+    DRONE: '#4cc9f0', MISSILE: '#f72585', ROCKET: '#b5179e',
+    AIR_DEFENSE: '#7209b7', AIRSPACE: '#f9c74f', UNKNOWN: '#6b7280',
+  };
+  const REFRESH_MS = 60_000;
+
+  // ============ State ============
+  const state = {
+    events: [],
+    view: 'map',
+    filters: {
+      hours: 72,
+      type: '',
+      severity: 'MEDIUM',
+      country: '',
+      search: '',   // client-side filter only
+    },
+    leafletMap: null,
+    leafletCluster: null,
+    leafletMarkers: new Map(),
+    globe: null,
+    chart: null,
+  };
+
+  // Restore filters from localStorage (so the user's choices stick).
+  try {
+    const saved = JSON.parse(localStorage.getItem('odin.filters') || '{}');
+    Object.assign(state.filters, saved);
+  } catch (_) {}
+
+  // ============ DOM ============
+  const $hours = document.getElementById('filter-hours');
+  const $type = document.getElementById('filter-type');
+  const $sev = document.getElementById('filter-severity');
+  const $country = document.getElementById('filter-country');
+  const $search = document.getElementById('filter-search');
+  const $list = document.getElementById('events-list');
+  const $toggle = document.getElementById('view-toggle');
+  const $mapDiv = document.getElementById('map');
+  const $globeDiv = document.getElementById('globe');
+  const $lastRefresh = document.getElementById('last-refresh');
+  const $chart = document.getElementById('timeline-chart');
+
+  $hours.value = String(state.filters.hours);
+  $type.value = state.filters.type;
+  $sev.value = state.filters.severity;
+  $search.value = state.filters.search;
+
+  // ============ Leaflet init ============
+  function initLeaflet() {
+    state.leafletMap = L.map('map', {
+      zoomControl: true,
+      worldCopyJump: true,
+    }).setView([40, 30], 3);
+
+    L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        subdomains: 'abcd',
+      }
+    ).addTo(state.leafletMap);
+
+    state.leafletCluster = L.markerClusterGroup({
+      maxClusterRadius: 40,
+      showCoverageOnHover: false,
+    });
+    state.leafletMap.addLayer(state.leafletCluster);
+  }
+
+  // ============ Globe init (lazy — only when first switched to) ============
+  function initGlobe() {
+    if (state.globe) return;
+    state.globe = Globe()
+      ($globeDiv)
+      .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-dark.jpg')
+      .backgroundColor('#000000')
+      .showAtmosphere(true)
+      .atmosphereColor('#4cc9f0')
+      .atmosphereAltitude(0.18)
+      .pointAltitude(0.012)
+      .pointRadius(d => 0.25 + (SEVERITY_RADIUS[d.severity] || 5) / 30)
+      .pointColor(d => SEVERITY_COLOR[d.severity] || '#888')
+      .pointLabel(d => `
+        <div class="globe-tooltip">
+          <div style="font-weight:700; margin-bottom:4px;">${escapeHtml(d.event_type)} / ${escapeHtml(d.severity)}</div>
+          <div>${escapeHtml(d.title || '').slice(0, 160)}</div>
+          <div style="color:#8893a8; margin-top:4px; font-size:11px;">${escapeHtml(d.location_name || '')} &middot; ${escapeHtml(d.domain || '')}</div>
+        </div>
+      `);
+
+    // Auto-rotate slowly until the user interacts.
+    state.globe.controls().autoRotate = true;
+    state.globe.controls().autoRotateSpeed = 0.4;
+    $globeDiv.addEventListener('pointerdown', () => {
+      if (state.globe) state.globe.controls().autoRotate = false;
+    }, { once: true });
+
+    // Resize handler.
+    window.addEventListener('resize', () => {
+      if (state.view !== 'globe' || !state.globe) return;
+      state.globe.width($globeDiv.clientWidth);
+      state.globe.height($globeDiv.clientHeight);
+    });
+  }
+
+  // ============ Render ============
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+
+  function renderMap() {
+    if (!state.leafletMap) return;
+    state.leafletCluster.clearLayers();
+    state.leafletMarkers.clear();
+
+    for (const ev of state.events) {
+      if (ev.latitude == null || ev.longitude == null) continue;
+      const color = SEVERITY_COLOR[ev.severity] || SEVERITY_COLOR.LOW;
+      const radius = SEVERITY_RADIUS[ev.severity] || 5;
+      const marker = L.circleMarker([ev.latitude, ev.longitude], {
+        radius,
+        color: '#0b0e14',
+        weight: 1,
+        fillColor: color,
+        fillOpacity: 0.85,
+      });
+      const country = ev.country || ev.location_name || '';
+      marker.bindPopup(`
+        <div style="max-width:280px;">
+          <div style="font-size:11px; color:#8893a8; margin-bottom:4px;">
+            <b style="color:${color};">${escapeHtml(ev.severity)}</b>
+            &middot; ${escapeHtml(ev.event_type)}
+            &middot; ${country ? `<a href="#" data-filter-country="${escapeHtml(country)}" style="color:#8893a8; text-decoration:underline;">${escapeHtml(country)}</a>` : '?'}
+          </div>
+          <div style="font-size:13px; line-height:1.35; margin-bottom:6px;">
+            ${escapeHtml(ev.title)}
+          </div>
+          <div>
+            <a href="${escapeHtml(ev.url)}" target="_blank" rel="noopener">
+              ${escapeHtml(ev.domain || 'view article')} &rarr;
+            </a>
+          </div>
+        </div>
+      `);
+      state.leafletCluster.addLayer(marker);
+      state.leafletMarkers.set(ev.id, marker);
+    }
+  }
+
+  // Clicking the country name in a popup filters to that country.
+  document.addEventListener('click', e => {
+    const link = e.target.closest('[data-filter-country]');
+    if (!link) return;
+    e.preventDefault();
+    const c = link.getAttribute('data-filter-country');
+    state.filters.country = c;
+    $country.value = c;
+    saveFilters();
+    refresh();
+  });
+
+  function renderGlobe() {
+    if (!state.globe) return;
+    const points = state.events
+      .filter(e => e.latitude != null && e.longitude != null)
+      .map(e => ({ ...e, lat: e.latitude, lng: e.longitude }));
+    state.globe.pointsData(points);
+  }
+
+  function visibleEvents() {
+    const q = (state.filters.search || '').toLowerCase().trim();
+    if (!q) return state.events;
+    return state.events.filter(ev => {
+      const hay = `${ev.title || ''} ${ev.snippet || ''} ${ev.country || ''} ${ev.location_name || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  function renderList() {
+    const items = visibleEvents();
+    if (!items.length) {
+      $list.innerHTML = '<div class="empty">No events match the current filters.<br><br>Try widening the time window, lowering minimum severity, or clearing the search box.</div>';
+      return;
+    }
+    const rows = items.slice(0, 200).map(ev => `
+      <div class="event severity-${ev.severity}" data-id="${ev.id}">
+        <div class="event-meta">
+          <span class="event-type ${ev.event_type}">${ev.event_type}</span>
+          <span class="event-sev ${ev.severity}">${ev.severity}</span>
+          <span>&middot;</span>
+          <span>${escapeHtml(ev.location_name || ev.country || '—')}</span>
+          <span style="margin-left:auto;">${escapeHtml(ev.domain || '')}</span>
+        </div>
+        <div class="event-title">${escapeHtml(ev.title)}</div>
+        <div class="event-loc">${escapeHtml((ev.snippet || '').slice(0, 140))}</div>
+      </div>
+    `).join('');
+    $list.innerHTML = rows;
+  }
+
+  // ============ Timeline chart ============
+  function initChart() {
+    if (state.chart) return;
+    state.chart = new Chart($chart.getContext('2d'), {
+      type: 'bar',
+      data: { labels: [], datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: { color: '#8893a8', boxWidth: 10, font: { size: 10 } },
+          },
+          tooltip: { mode: 'index', intersect: false },
+        },
+        scales: {
+          x: {
+            stacked: true,
+            ticks: { color: '#8893a8', font: { size: 9 }, maxTicksLimit: 6 },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: { color: '#8893a8', font: { size: 9 }, precision: 0 },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+        },
+      },
+    });
+  }
+
+  function updateChart(series, bucketHours) {
+    initChart();
+    if (!series || !series.length) {
+      state.chart.data.labels = [];
+      state.chart.data.datasets = [];
+      state.chart.update();
+      return;
+    }
+    // Collect all event types that appeared in the window.
+    const typesSet = new Set();
+    series.forEach(b => {
+      Object.keys(b).forEach(k => {
+        if (k !== 'ts' && k !== 'UNKNOWN') typesSet.add(k);
+      });
+    });
+    const types = Array.from(typesSet).sort();
+
+    const fmt = (iso) => {
+      const d = new Date(iso);
+      if (bucketHours >= 24) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      return d.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit' });
+    };
+
+    state.chart.data.labels = series.map(b => fmt(b.ts));
+    state.chart.data.datasets = types.map(t => ({
+      label: t,
+      data: series.map(b => b[t] || 0),
+      backgroundColor: TYPE_COLOR[t] || '#888',
+      borderWidth: 0,
+    }));
+    state.chart.update();
+  }
+
+  // ============ Country dropdown ============
+  function updateCountryDropdown(topCountries) {
+    const desired = state.filters.country || '';
+    const current = new Set(Array.from($country.options).map(o => o.value));
+    const desiredSet = new Set(['']);
+    (topCountries || []).forEach(c => desiredSet.add(c.country));
+    if (desired) desiredSet.add(desired);
+
+    // Only rebuild if the set changed (avoid resetting selection unnecessarily).
+    if (current.size === desiredSet.size && [...current].every(v => desiredSet.has(v))) {
+      $country.value = desired;
+      return;
+    }
+    const opts = ['<option value="">All countries</option>'];
+    (topCountries || []).forEach(c => {
+      opts.push(`<option value="${escapeHtml(c.country)}">${escapeHtml(c.country)} (${c.count})</option>`);
+    });
+    if (desired && !(topCountries || []).some(c => c.country === desired)) {
+      opts.push(`<option value="${escapeHtml(desired)}">${escapeHtml(desired)}</option>`);
+    }
+    $country.innerHTML = opts.join('');
+    $country.value = desired;
+  }
+
+  function renderStats(events) {
+    const total = events.length;
+    const by = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+    events.forEach(e => { if (by[e.severity] != null) by[e.severity]++; });
+    document.getElementById('stat-total').textContent = total;
+    document.getElementById('stat-high').textContent = by.HIGH;
+    document.getElementById('stat-medium').textContent = by.MEDIUM;
+    document.getElementById('stat-low').textContent = by.LOW;
+  }
+
+  // ============ Data ============
+  async function fetchEvents() {
+    const params = new URLSearchParams({
+      hours: state.filters.hours,
+      geo_only: 'true',
+      limit: '1000',
+    });
+    if (state.filters.type) params.set('event_type', state.filters.type);
+    if (state.filters.severity) params.set('min_severity', state.filters.severity);
+    if (state.filters.country) params.set('country', state.filters.country);
+
+    const res = await fetch('/api/events?' + params);
+    if (!res.ok) throw new Error('API events ' + res.status);
+    const data = await res.json();
+    state.events = data.events || [];
+  }
+
+  async function fetchStats() {
+    const res = await fetch('/api/stats?hours=' + state.filters.hours);
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async function fetchTimeline() {
+    const res = await fetch('/api/timeline?hours=' + state.filters.hours);
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async function refresh() {
+    try {
+      const [_, stats, timeline] = await Promise.all([
+        fetchEvents(),
+        fetchStats(),
+        fetchTimeline(),
+      ]);
+      renderAll();
+      if (stats) updateCountryDropdown(stats.top_countries || []);
+      if (timeline) updateChart(timeline.series, timeline.bucket_hours);
+      $lastRefresh.textContent = 'updated ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      console.error(err);
+      $list.innerHTML = '<div class="empty">Could not load events. Is the API running?</div>';
+    }
+  }
+
+  function renderAll() {
+    renderStats(state.events);
+    renderMap();
+    renderGlobe();
+    renderList();
+  }
+
+  // ============ View toggle ============
+  function setView(view) {
+    state.view = view;
+    $toggle.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('active', b.dataset.view === view);
+    });
+    if (view === 'map') {
+      $mapDiv.classList.remove('hidden');
+      $globeDiv.classList.add('hidden');
+      // Leaflet needs a relayout if it was created while hidden.
+      setTimeout(() => state.leafletMap?.invalidateSize(), 50);
+    } else {
+      $globeDiv.classList.remove('hidden');
+      $mapDiv.classList.add('hidden');
+      initGlobe();
+      // Globe needs explicit width/height the first time.
+      setTimeout(() => {
+        state.globe?.width($globeDiv.clientWidth);
+        state.globe?.height($globeDiv.clientHeight);
+        renderGlobe();
+      }, 50);
+    }
+  }
+
+  // ============ Wire up ============
+  function saveFilters() {
+    try { localStorage.setItem('odin.filters', JSON.stringify(state.filters)); } catch (_) {}
+  }
+
+  $hours.addEventListener('change', () => {
+    state.filters.hours = +$hours.value;
+    saveFilters();
+    refresh();
+  });
+  $type.addEventListener('change', () => {
+    state.filters.type = $type.value;
+    saveFilters();
+    refresh();
+  });
+  $sev.addEventListener('change', () => {
+    state.filters.severity = $sev.value;
+    saveFilters();
+    refresh();
+  });
+  $country.addEventListener('change', () => {
+    state.filters.country = $country.value;
+    saveFilters();
+    refresh();
+  });
+
+  // Search is purely client-side — debounced so each keystroke doesn't re-render.
+  let searchTimer = null;
+  $search.addEventListener('input', () => {
+    state.filters.search = $search.value;
+    saveFilters();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => renderList(), 120);
+  });
+
+  $toggle.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (btn) setView(btn.dataset.view);
+  });
+
+  $list.addEventListener('click', e => {
+    const card = e.target.closest('.event');
+    if (!card) return;
+    const id = +card.dataset.id;
+    const ev = state.events.find(x => x.id === id);
+    if (!ev || ev.latitude == null) return;
+    if (state.view === 'map') {
+      state.leafletMap.setView([ev.latitude, ev.longitude], 6, { animate: true });
+      const m = state.leafletMarkers.get(id);
+      if (m) m.openPopup();
+    } else {
+      state.globe?.pointOfView({ lat: ev.latitude, lng: ev.longitude, altitude: 1.5 }, 800);
+    }
+  });
+
+  // ============ Boot ============
+  initLeaflet();
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+})();
+</script>
+</body>
+</html>
