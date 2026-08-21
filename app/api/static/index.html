@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Project Odin Overwatch</title>
 
+  <!-- Inline SVG favicon — pulsing red dot matches the header logo. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='24' fill='%23e74c3c'/%3E%3Ccircle cx='32' cy='32' r='24' fill='none' stroke='%23e74c3c' stroke-opacity='0.4' stroke-width='6'/%3E%3C/svg%3E" />
+
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
@@ -296,6 +299,109 @@
       max-width: 300px;
       pointer-events: none;
     }
+
+    /* ===== Pulsing HIGH-severity marker (Leaflet divIcon) ===== */
+    .pulse-marker {
+      position: relative;
+      width: 22px;
+      height: 22px;
+    }
+    .pulse-marker .dot {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 10px; height: 10px;
+      margin: -5px 0 0 -5px;
+      background: var(--high);
+      border-radius: 50%;
+      box-shadow: 0 0 6px rgba(231,76,60,0.9), 0 0 0 1px #0b0e14;
+      z-index: 2;
+    }
+    .pulse-marker .halo {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 22px; height: 22px;
+      margin: -11px 0 0 -11px;
+      border-radius: 50%;
+      background: rgba(231,76,60,0.35);
+      animation: pulse-halo 2s ease-out infinite;
+      z-index: 1;
+    }
+    .pulse-marker .halo:nth-child(2) { animation-delay: 0.7s; }
+    @keyframes pulse-halo {
+      0%   { transform: scale(0.5); opacity: 0.85; }
+      100% { transform: scale(3.2); opacity: 0; }
+    }
+
+    /* ===== Kiosk / fullscreen mode ===== */
+    body.kiosk header,
+    body.kiosk aside { display: none; }
+    body.kiosk .main { top: 0; }
+    #kiosk-exit {
+      position: fixed;
+      top: 12px; right: 12px;
+      z-index: 2000;
+      display: none;
+      background: rgba(19,24,38,0.85);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+    }
+    body.kiosk #kiosk-exit { display: block; }
+    #kiosk-exit:hover { background: rgba(35,42,61,0.95); }
+
+    .kiosk-hint {
+      position: fixed;
+      bottom: 12px; left: 12px;
+      font-size: 10px;
+      color: var(--text-dim);
+      z-index: 999;
+      pointer-events: none;
+      opacity: 0.7;
+    }
+
+    /* ===== Empty state ===== */
+    .empty-state {
+      padding: 32px 20px;
+      text-align: center;
+      color: var(--text-dim);
+    }
+    .empty-state .ring {
+      width: 44px; height: 44px;
+      margin: 0 auto 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: empty-spin 1.4s linear infinite;
+      opacity: 0.6;
+    }
+    @keyframes empty-spin {
+      to { transform: rotate(360deg); }
+    }
+    .empty-state h3 {
+      color: var(--text);
+      margin: 0 0 8px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .empty-state p {
+      margin: 4px 0;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .empty-state code {
+      background: var(--panel-2);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent);
+      font-size: 11px;
+    }
   </style>
 </head>
 <body>
@@ -338,6 +444,9 @@
     <button data-view="globe">Globe</button>
   </div>
 </header>
+
+<button id="kiosk-exit" title="Exit kiosk mode (F or Esc)">Exit kiosk</button>
+<div class="kiosk-hint">Press <b>F</b> for fullscreen</div>
 
 <div class="main">
   <div class="view-container">
@@ -390,9 +499,11 @@
     },
     leafletMap: null,
     leafletCluster: null,
+    leafletPulse: null,
     leafletMarkers: new Map(),
     globe: null,
     chart: null,
+    kiosk: false,
   };
 
   // Restore filters from localStorage (so the user's choices stick).
@@ -440,6 +551,10 @@
       showCoverageOnHover: false,
     });
     state.leafletMap.addLayer(state.leafletCluster);
+
+    // Second layer sitting above the cluster group: pulsing halos for
+    // HIGH-severity events. Not clustered — we want each one visible.
+    state.leafletPulse = L.layerGroup().addTo(state.leafletMap);
   }
 
   // ============ Globe init (lazy — only when first switched to) ============
@@ -461,7 +576,16 @@
           <div>${escapeHtml(d.title || '').slice(0, 160)}</div>
           <div style="color:#8893a8; margin-top:4px; font-size:11px;">${escapeHtml(d.location_name || '')} &middot; ${escapeHtml(d.domain || '')}</div>
         </div>
-      `);
+      `)
+      // Radar-style pulsing rings for HIGH events. Layered on top of
+      // regular points to draw the eye without cluttering the globe.
+      .ringLat('latitude')
+      .ringLng('longitude')
+      .ringAltitude(0.012)
+      .ringColor(() => (t => `rgba(231, 76, 60, ${1 - t})`))
+      .ringMaxRadius(4)
+      .ringPropagationSpeed(2)
+      .ringRepeatPeriod(1400);
 
     // Auto-rotate slowly until the user interacts.
     state.globe.controls().autoRotate = true;
@@ -485,10 +609,46 @@
     })[c]);
   }
 
+  // Source-aware link rewriter. Some sources store URLs that are useless
+  // to a human (LL2 API endpoints return JSON, FAA detail pages 404
+  // when the NOTAM ID format shifts). Rewrite those to something a
+  // human can actually use.
+  function _popupLink(ev) {
+    const domain = (ev.domain || '').toLowerCase();
+    if (domain === 'll.thespacedevs.com') {
+      const q = encodeURIComponent(ev.title || 'rocket launch');
+      return { href: `https://www.google.com/search?q=${q}`, label: 'search launch' };
+    }
+    if (domain === 'tfr.faa.gov') {
+      // FAA's own list page always works; user can find the NOTAM there.
+      return { href: 'https://tfr.faa.gov/tfr2/list.html', label: 'FAA TFR list' };
+    }
+    return { href: ev.url || '#', label: ev.domain || 'view article' };
+  }
+
   function renderMap() {
     if (!state.leafletMap) return;
     state.leafletCluster.clearLayers();
+    state.leafletPulse.clearLayers();
     state.leafletMarkers.clear();
+
+    // Pulsing halos on HIGH events. Rendered as an unclustered divIcon
+    // layer sitting above the cluster group so the pulse is always visible.
+    const pulseIcon = L.divIcon({
+      className: '',
+      html: '<div class="pulse-marker"><div class="halo"></div><div class="halo"></div><div class="dot"></div></div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    });
+    for (const ev of state.events) {
+      if (ev.latitude == null || ev.longitude == null) continue;
+      if (ev.severity !== 'HIGH') continue;
+      L.marker([ev.latitude, ev.longitude], {
+        icon: pulseIcon,
+        interactive: false,
+        keyboard: false,
+      }).addTo(state.leafletPulse);
+    }
 
     for (const ev of state.events) {
       if (ev.latitude == null || ev.longitude == null) continue;
@@ -502,6 +662,7 @@
         fillOpacity: 0.85,
       });
       const country = ev.country || ev.location_name || '';
+      const { href: linkHref, label: linkLabel } = _popupLink(ev);
       marker.bindPopup(`
         <div style="max-width:280px;">
           <div style="font-size:11px; color:#8893a8; margin-bottom:4px;">
@@ -513,8 +674,8 @@
             ${escapeHtml(ev.title)}
           </div>
           <div>
-            <a href="${escapeHtml(ev.url)}" target="_blank" rel="noopener">
-              ${escapeHtml(ev.domain || 'view article')} &rarr;
+            <a href="${escapeHtml(linkHref)}" target="_blank" rel="noopener">
+              ${escapeHtml(linkLabel)} &rarr;
             </a>
           </div>
         </div>
@@ -542,6 +703,9 @@
       .filter(e => e.latitude != null && e.longitude != null)
       .map(e => ({ ...e, lat: e.latitude, lng: e.longitude }));
     state.globe.pointsData(points);
+    // Only HIGH events pulse — enough visual weight to draw the eye
+    // without turning the globe into disco.
+    state.globe.ringsData(points.filter(e => e.severity === 'HIGH'));
   }
 
   function visibleEvents() {
@@ -556,7 +720,13 @@
   function renderList() {
     const items = visibleEvents();
     if (!items.length) {
-      $list.innerHTML = '<div class="empty">No events match the current filters.<br><br>Try widening the time window, lowering minimum severity, or clearing the search box.</div>';
+      $list.innerHTML = `
+        <div class="empty-state">
+          <div class="ring"></div>
+          <h3>All quiet</h3>
+          <p>No events match the current filters.</p>
+          <p>Try widening <code>Window</code>, lowering <code>Min severity</code>, or clearing the search box.</p>
+        </div>`;
       return;
     }
     const rows = items.slice(0, 200).map(ev => `
@@ -579,12 +749,19 @@
   function initChart() {
     if (state.chart) return;
     state.chart = new Chart($chart.getContext('2d'), {
-      type: 'bar',
+      // Stacked area chart with smooth curves — reads as "activity flow"
+      // rather than discrete bars.
+      type: 'line',
       data: { labels: [], datasets: [] },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
+        interaction: { mode: 'index', intersect: false },
+        elements: {
+          line: { tension: 0.35, borderWidth: 1.5 },
+          point: { radius: 0, hoverRadius: 4 },
+        },
         plugins: {
           legend: {
             display: true,
@@ -608,6 +785,17 @@
         },
       },
     });
+  }
+
+  // Convert a solid color like "#f72585" into a Chart.js area gradient
+  // that fades to transparent. Called per-dataset when the chart re-renders.
+  function _areaGradient(ctx, color) {
+    const { chartArea } = ctx.chart;
+    if (!chartArea) return color; // chart not laid out yet
+    const g = ctx.chart.ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+    g.addColorStop(0, color + 'CC');
+    g.addColorStop(1, color + '10');
+    return g;
   }
 
   function updateChart(series, bucketHours) {
@@ -634,12 +822,16 @@
     };
 
     state.chart.data.labels = series.map(b => fmt(b.ts));
-    state.chart.data.datasets = types.map(t => ({
-      label: t,
-      data: series.map(b => b[t] || 0),
-      backgroundColor: TYPE_COLOR[t] || '#888',
-      borderWidth: 0,
-    }));
+    state.chart.data.datasets = types.map(t => {
+      const color = TYPE_COLOR[t] || '#888';
+      return {
+        label: t,
+        data: series.map(b => b[t] || 0),
+        borderColor: color,
+        backgroundColor: (ctx) => _areaGradient(ctx, color),
+        fill: true,
+      };
+    });
     state.chart.update();
   }
 
@@ -707,20 +899,29 @@
   }
 
   async function refresh() {
+    // Fetch events FIRST and render immediately so the map/list appear
+    // before we wait for stats and timeline. Slowest of the three no
+    // longer blocks first paint.
+    $lastRefresh.textContent = 'loading…';
     try {
-      const [_, stats, timeline] = await Promise.all([
-        fetchEvents(),
-        fetchStats(),
-        fetchTimeline(),
-      ]);
+      await fetchEvents();
       renderAll();
-      if (stats) updateCountryDropdown(stats.top_countries || []);
-      if (timeline) updateChart(timeline.series, timeline.bucket_hours);
-      $lastRefresh.textContent = 'updated ' + new Date().toLocaleTimeString();
+      $lastRefresh.textContent = 'events loaded, updating chart…';
     } catch (err) {
       console.error(err);
       $list.innerHTML = '<div class="empty">Could not load events. Is the API running?</div>';
+      $lastRefresh.textContent = 'error — see console';
+      return;
     }
+    // Stats + timeline run in the background; failures don't block.
+    Promise.all([fetchStats(), fetchTimeline()]).then(([stats, timeline]) => {
+      if (stats) updateCountryDropdown(stats.top_countries || []);
+      if (timeline) updateChart(timeline.series, timeline.bucket_hours);
+      $lastRefresh.textContent = 'updated ' + new Date().toLocaleTimeString();
+    }).catch(err => {
+      console.error(err);
+      $lastRefresh.textContent = 'events ok, chart failed';
+    });
   }
 
   function renderAll() {
@@ -808,6 +1009,28 @@
       state.globe?.pointOfView({ lat: ev.latitude, lng: ev.longitude, altitude: 1.5 }, 800);
     }
   });
+
+  // ============ Kiosk / fullscreen mode ============
+  function setKiosk(on) {
+    state.kiosk = !!on;
+    document.body.classList.toggle('kiosk', state.kiosk);
+    // Views need a relayout after the sidebar/header collapse.
+    setTimeout(() => {
+      state.leafletMap?.invalidateSize();
+      if (state.globe) {
+        state.globe.width($globeDiv.clientWidth);
+        state.globe.height($globeDiv.clientHeight);
+      }
+    }, 60);
+  }
+  document.addEventListener('keydown', e => {
+    // Ignore when typing in the search box or a dropdown.
+    const tag = (e.target && e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    if (e.key === 'f' || e.key === 'F') { setKiosk(!state.kiosk); e.preventDefault(); }
+    else if (e.key === 'Escape' && state.kiosk) { setKiosk(false); }
+  });
+  document.getElementById('kiosk-exit').addEventListener('click', () => setKiosk(false));
 
   // ============ Boot ============
   initLeaflet();
